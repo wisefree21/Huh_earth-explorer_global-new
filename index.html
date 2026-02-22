@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>지도 위, 함께 톡톡! (Tap Together on the Map!)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <!-- 폰트: Noto Sans KR -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; }
+        #map { height: 100dvh; width: 100vw; z-index: 0; }
+        .modal-overlay { z-index: 50; }
+        .hud { z-index: 40; }
+        .guessing-cursor { cursor: crosshair !important; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #c7c7cc; border-radius: 4px; }
+        /* 체크박스 커스텀 토글 스타일 */
+        .toggle-checkbox:checked { right: 0; border-color: #22c55e; }
+        .toggle-checkbox:checked + .toggle-label { background-color: #22c55e; }
+    </style>
+</head>
+<body class="bg-gray-100 overflow-hidden relative">
+
+    <!-- 메인 지도 영역 -->
+    <div id="map"></div>
+
+    <!-- 상단 HUD -->
+    <div id="hud-top" class="hud absolute top-0 left-0 w-full p-2 sm:p-4 pointer-events-none hidden mt-12 sm:mt-0">
+        <div class="flex flex-wrap justify-between items-start w-full gap-y-2 relative">
+            <div class="bg-white/90 backdrop-blur-sm shadow-lg rounded-xl p-2 sm:p-4 pointer-events-auto border-2 border-green-500 w-auto">
+                <h2 id="hud-player" class="text-xs sm:text-xl font-bold text-green-700 mb-1">1플레이어 차례</h2>
+                <p id="hud-round" class="text-[10px] sm:text-sm text-gray-600">라운드: 1 / 3</p>
+            </div>
+            <div class="w-full sm:w-auto order-last sm:order-none sm:absolute sm:left-1/2 sm:-translate-x-1/2 flex justify-center pointer-events-none mt-1 sm:mt-0">
+                <div class="bg-green-600 shadow-xl rounded-xl p-2 sm:p-4 pointer-events-auto text-center border-2 border-white transform hover:scale-105 transition-transform w-full sm:w-auto max-w-xs sm:max-w-md">
+                    <p id="hud-target-intro" class="text-green-100 text-[10px] sm:text-sm font-semibold mb-1" data-i18n="targetIntro">다음 지역을 지도에서 찾으세요!</p>
+                    <h1 id="hud-target" class="text-lg sm:text-3xl font-bold text-white tracking-tight break-keep">전라도</h1>
+                </div>
+            </div>
+            <div id="hud-scores" class="bg-white/90 backdrop-blur-sm shadow-lg rounded-xl p-2 sm:p-4 pointer-events-auto min-w-[90px] sm:min-w-[150px] w-auto">
+                <h3 class="text-[10px] sm:text-sm font-bold text-gray-800 border-b pb-1 sm:pb-2 mb-1 sm:mb-2" data-i18n="scoreBoard">점수 현황</h3>
+                <ul id="score-list" class="space-y-1 text-[10px] sm:text-sm font-medium text-gray-700"></ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- 모달: 시작 화면 (모바일 1화면 최적화 UI) -->
+    <div id="modal-start" class="modal-overlay absolute inset-0 bg-black/60 flex justify-center items-center transition-opacity duration-300 py-4 px-3 sm:py-8 sm:px-0">
+        <div class="bg-white rounded-2xl shadow-2xl p-4 sm:p-6 w-full max-w-md max-h-[95vh] overflow-y-auto flex flex-col relative">
+            
+            <!-- 제목 (독립적인 줄을 사용하여 어떤 언어든 공간을 넓게 쓰도록 함) -->
+            <h1 class="text-xl sm:text-3xl font-black text-gray-800 tracking-tight leading-tight break-keep mb-2" data-i18n="title">지도 위, 함께 톡톡!</h1>
+            
+            <!-- 저작자 표시 및 언어 선택 (같은 줄 배치) -->
+            <div class="flex items-center justify-between flex-wrap gap-2 mb-4 w-full border-b border-gray-100 pb-3">
+                <div class="flex items-center flex-wrap gap-1">
+                    <span class="text-[11px] sm:text-xs font-bold text-indigo-600" data-i18n="author">저작자: Huh Byung doo</span>
+                    <a href="mailto:wisefree@empas.com" class="text-[10px] sm:text-xs font-normal text-gray-500 hover:text-indigo-600 transition-colors bg-gray-100 px-2 py-0.5 rounded-full">(wisefree@empas.com)</a>
+                </div>
+                
+                <!-- 언어 전환 선택창 (이메일 우측으로 이동) -->
+                <select id="lang-selector" class="shrink-0 bg-gray-100 px-2 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold text-gray-700 shadow-sm border border-gray-200 hover:bg-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 cursor-pointer text-center outline-none">
+                    <option value="ko">🇰🇷 한국어</option>
+                    <option value="en">🇺🇸 English</option>
+                    <option value="ja">🇯🇵 日本語</option>
+                    <option value="zh">🇨🇳 中文</option>
+                    <option value="es">🇪🇸 Español</option>
+                    <option value="fr">🇫🇷 Français</option>
+                    <option value="de">🇩🇪 Deutsch</option>
+                    <option value="pt">🇵🇹 Português</option>
+                    <option value="it">🇮🇹 Italiano</option>
+                    <option value="ru">🇷🇺 Русский</option>
+                    <option value="hi">🇮🇳 हिन्दी</option>
+                </select>
+            </div>
+            
+            <div class="space-y-3 text-left flex-1">
+                <!-- 참여 인원 및 라운드 -->
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1" data-i18n="playerCount">참여 인원</label>
+                        <div class="flex space-x-1">
+                            <button class="player-btn flex-1 py-1.5 rounded-lg border-2 border-green-600 bg-green-600 text-white font-bold transition-colors min-h-[40px]" data-players="1">1</button>
+                            <button class="player-btn flex-1 py-1.5 rounded-lg border-2 border-gray-300 text-gray-600 hover:border-green-400 font-bold transition-colors min-h-[40px]" data-players="2">2</button>
+                            <button class="player-btn flex-1 py-1.5 rounded-lg border-2 border-gray-300 text-gray-600 hover:border-green-400 font-bold transition-colors min-h-[40px]" data-players="3">3</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1" data-i18n="roundCount">라운드 수</label>
+                        <div class="flex space-x-1">
+                            <button class="round-btn flex-1 py-1.5 rounded-lg border-2 border-green-600 bg-green-600 text-white font-bold transition-colors min-h-[40px]" data-rounds="3">3</button>
+                            <button class="round-btn flex-1 py-1.5 rounded-lg border-2 border-gray-300 text-gray-600 hover:border-green-400 font-bold transition-colors min-h-[40px]" data-rounds="5">5</button>
+                            <button class="round-btn flex-1 py-1.5 rounded-lg border-2 border-gray-300 text-gray-600 hover:border-green-400 font-bold transition-colors min-h-[40px]" data-rounds="10">10</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 명예의 전당 토글 -->
+                <div class="bg-green-50 px-3 py-2 rounded-xl border border-green-100 flex items-center justify-between">
+                    <span class="text-xs sm:text-sm font-bold text-green-800" data-i18n="recordScore">오늘 명예의 전당 점수 기록</span>
+                    <div class="relative inline-block w-10 mr-1 align-middle select-none transition duration-200 ease-in">
+                        <input type="checkbox" id="record-score-toggle" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 border-gray-300 appearance-none cursor-pointer z-10 transition-transform duration-200 ease-in-out"/>
+                        <label for="record-score-toggle" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-300 cursor-pointer"></label>
+                    </div>
+                </div>
+                <!-- 이름 입력 -->
+                <div id="name-inputs-container" class="hidden grid gap-1"></div>
+
+                <!-- 막대그래프형 난이도 설정 -->
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1" data-i18n="diffSelect">난이도 선택</label>
+                    
+                    <div class="flex items-end justify-between h-20 sm:h-24 gap-1.5 sm:gap-2 px-1 border-b-[3px] border-gray-300 pb-0 mt-2">
+                        <button class="diff-btn flex-1 rounded-t-lg border-x-2 border-t-2 border-b-0 border-green-600 bg-green-500 text-white font-bold transition-all text-xs sm:text-sm flex items-center justify-center text-center shadow-md" style="height: 45%;" data-diff="beginner" data-i18n="diffBeginner">초급</button>
+                        <button class="diff-btn flex-1 rounded-t-lg border-x-2 border-t-2 border-b-0 border-gray-300 bg-gray-100 text-gray-500 font-bold transition-all text-xs sm:text-sm flex items-center justify-center text-center hover:bg-gray-200" style="height: 60%;" data-diff="intermediate" data-i18n="diffIntermediate">중급</button>
+                        <button class="diff-btn flex-1 rounded-t-lg border-x-2 border-t-2 border-b-0 border-gray-300 bg-gray-100 text-gray-500 font-bold transition-all text-xs sm:text-sm flex items-center justify-center text-center hover:bg-gray-200" style="height: 80%;" data-diff="advanced" data-i18n="diffAdvanced">고급</button>
+                        <button class="diff-btn flex-1 rounded-t-lg border-x-2 border-t-2 border-b-0 border-gray-300 bg-gray-100 text-gray-500 font-bold transition-all text-xs sm:text-sm flex items-center justify-center text-center hover:bg-gray-200" style="height: 100%;" data-diff="expert" data-i18n="diffExpert">최고급</button>
+                    </div>
+                    
+                    <button class="diff-btn w-full mt-3 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-600 bg-white font-bold hover:bg-gray-50 transition-colors text-xs sm:text-sm min-h-[40px]" data-diff="community" id="btn-community-diff" data-i18n="diffCommunity">🌍 모두가 함께 만든 코스</button>
+                    <p id="diff-desc" class="text-[11px] text-gray-500 mt-2 text-center leading-tight break-keep" data-i18n="diffDescBeginner">오차 허용 범위가 넓습니다. 지역이나 국가 근처만 찍어도 높은 점수를 얻습니다.</p>
+                </div>
+            </div>
+
+            <button id="btn-start-game" class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform hover:-translate-y-1 text-base sm:text-lg min-h-[50px]" data-i18n="btnStart">탐험 시작하기</button>
+
+            <!-- 리더보드 -->
+            <div class="mt-4 border-t border-gray-100 pt-3">
+                <h3 class="text-xs sm:text-sm font-bold text-gray-600 mb-2 flex items-center justify-center" data-i18n="leaderboardTitle">
+                    <span class="text-yellow-500 mr-1">🏆</span> 오늘 달성한 최고 점수 (Top 3)
+                </h3>
+                <ul id="leaderboard-list" class="space-y-1 text-xs sm:text-sm">
+                    <li class="text-gray-400 text-center py-1 text-xs" data-i18n="leaderboardLoading">순위 데이터를 불러오는 중입니다...</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- 모달: 차례 알림 -->
+    <div id="modal-turn" class="modal-overlay absolute inset-0 bg-black/50 hidden flex items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 max-w-sm w-full text-center mx-4">
+            <h2 id="turn-player-text" class="text-xl sm:text-2xl font-bold text-green-600 mb-2 sm:mb-4">1플레이어 준비!</h2>
+            <p class="text-sm sm:text-base text-gray-600 mb-4 sm:mb-6" data-i18n="turnSubtitle">다음 지역을 찾을 준비가 되셨나요?</p>
+            <h3 id="turn-target-text" class="text-2xl sm:text-3xl font-black text-gray-800 mb-6 sm:mb-8 bg-gray-100 py-4 rounded-xl break-keep">전라도</h3>
+            <button id="btn-ready" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition-colors" data-i18n="btnReady">확인 (지도 보기)</button>
+        </div>
+    </div>
+
+    <!-- 모달: 결과 발표 -->
+    <div id="modal-result" class="modal-overlay absolute inset-0 bg-black/40 hidden flex items-center justify-end p-4 sm:p-8 pb-8 sm:pb-12 flex-col pointer-events-none">
+        <div class="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-md w-full text-center pointer-events-auto mb-4 border-t-8 border-green-500">
+            <h2 class="text-lg sm:text-xl font-bold text-gray-800 mb-3 sm:mb-4" data-i18n="resultTitle">탐색 결과</h2>
+            <div class="flex justify-between items-center bg-gray-50 p-3 sm:p-4 rounded-xl mb-3 sm:mb-4 gap-2 sm:gap-4">
+                <div class="text-left flex-1">
+                    <p class="text-[10px] sm:text-sm text-gray-500 break-keep" data-i18n="resultDist">실제 위치와 떨어진 거리</p>
+                    <p id="result-distance" class="text-lg sm:text-2xl font-black text-red-500 break-keep">150 km</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-[10px] sm:text-sm text-gray-500" data-i18n="resultScore">획득 점수</p>
+                    <p id="result-score" class="text-xl sm:text-2xl font-black text-green-600 whitespace-nowrap">8,500</p>
+                </div>
+            </div>
+            <p id="result-msg" class="text-sm sm:text-base text-gray-600 font-medium mb-4 sm:mb-6 break-keep">아주 훌륭합니다! 거의 정확하게 찾으셨네요.</p>
+            <button id="btn-next-turn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition-colors" data-i18n="btnNext">다음 차례로</button>
+        </div>
+    </div>
+
+    <!-- 모달: 최종 결과 -->
+    <div id="modal-final" class="modal-overlay absolute inset-0 bg-black/80 hidden flex items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 max-w-md w-full text-center mx-4">
+            <div class="mb-4 text-yellow-400">
+                <svg class="w-16 h-16 sm:w-20 sm:h-20 mx-auto" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 2a1 1 0 011 1v1h1a1 1 0 010 2H6v1a1 1 0 01-2 0V6H3a1 1 0 010-2h1V3a1 1 0 011-1zm0 10a1 1 0 011 1v1h1a1 1 0 110 2H6v1a1 1 0 11-2 0v-1H3a1 1 0 110-2h1v-1a1 1 0 011-1zM12 2a1 1 0 01.967.744L14.146 7.2 17.5 9.134a1 1 0 010 1.732l-3.354 1.935-1.18 4.455a1 1 0 01-1.933 0L9.854 12.8 6.5 10.866a1 1 0 010-1.732l3.354-1.935 1.18-4.455A1 1 0 0112 2z" clip-rule="evenodd"></path></svg>
+            </div>
+            <h1 class="text-2xl sm:text-3xl font-black text-gray-800 mb-2" data-i18n="gameEnd">탐험 종료!</h1>
+            <h2 id="final-winner" class="text-lg sm:text-xl font-bold text-green-600 mb-6 sm:mb-8 break-keep">1플레이어가 우승했습니다!</h2>
+            <div id="final-scores-list" class="space-y-2 sm:space-y-3 mb-6 sm:mb-8 text-left"></div>
+            <button id="btn-restart" class="w-full bg-gray-800 hover:bg-gray-900 text-white font-bold py-3 px-4 rounded-xl shadow-md transition-colors" data-i18n="btnRestart">처음으로 돌아가기</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- 다국어 딕셔너리 (11개 국어 지원) ---
+        const i18n = {
+            ko: {
+                title: "지도 위, 함께 톡톡!",
+                author: "저작자: Huh Byung doo",
+                playerCount: "참여 인원", recordScore: "오늘 명예의 전당 점수 기록", namePlaceholder: "이름 (안 쓰면 '익명')", roundCount: "라운드 수",
+                diffSelect: "난이도 선택",
+                diffBeginner: "초급", diffIntermediate: "중급", diffAdvanced: "고급", diffExpert: "최고급", diffCommunity: "🌍 모두가 함께 만든 코스",
+                diffDescBeginner: "오차 허용 범위가 넓습니다. 지역이나 국가 근처만 찍어도 높은 점수를 얻습니다.",
+                diffDescInter: "오차 허용 범위가 보통입니다. 해당 도시나 지역 근방을 정확히 노려야 합니다.",
+                diffDescAdv: "오차 허용 범위가 좁습니다. 특정 랜드마크나 구/동 단위의 세밀한 위치를 찾아야 합니다.",
+                diffDescExpert: "오차 허용 범위가 매우 엄격합니다. 역사적 장소의 정확한 좌표를 짚어내야 최고점을 받습니다.",
+                diffDescComm: "전 세계 탐험가들이 직접 출제하여 클라우드에 공유한 문제입니다!",
+                btnStart: "탐험 시작하기",
+                leaderboardTitle: "🏆 오늘 달성한 최고 점수 (Top 3)", leaderboardLoading: "데이터를 불러오는 중입니다...",
+                targetIntro: "다음 지역을 지도에서 찾으세요!", scoreBoard: "점수 현황",
+                resultTitle: "탐색 결과", resultDist: "실제 위치와 떨어진 거리", resultScore: "획득 점수", btnNext: "다음 차례로",
+                gameEnd: "탐험 종료!", btnRestart: "처음으로 돌아가기",
+                turnSubtitle: "다음 지역을 찾을 준비가 되셨나요?", btnReady: "확인 (지도 보기)",
+                msgPerfect: "완벽합니다! 해당 지역 안에 정확하게 찍으셨습니다!", msgExcellent: "아주 훌륭합니다! 정답 구역에 무척 가깝게 찍으셨네요.",
+                msgGood: "훌륭합니다! 꽤 정확한 위치를 알고 계시군요.", msgOkay: "아쉽네요. 방향은 얼추 비슷했습니다.",
+                msgBad: "많이 벗어났습니다. 다음에는 더 신중하게 탐험해 보세요.", msgFail: "완전히 다른 곳을 짚으셨습니다. 분발하세요!",
+                distHit: "정답 구역 적중! (중심에서",
+                playerTurn: "님 차례", playerReady: "님 준비!", roundTxt: "라운드", winTxt: "님이 우승했습니다!",
+                anon: "익명의 탐험가", myMark: "내가 선택한 위치", realMark: "실제 중심 위치:"
+            },
+            en: {
+                title: "Tap Together on the Map!", author: "Creator: Huh Byung doo",
+                playerCount: "Players", recordScore: "Save to Hall of Fame", namePlaceholder: "Name (or 'Anon')", roundCount: "Rounds",
+                diffSelect: "Difficulty", diffBeginner: "Beginner", diffIntermediate: "Intermediate", diffAdvanced: "Advanced", diffExpert: "Expert", diffCommunity: "🌍 Community Courses",
+                diffDescBeginner: "Generous margin of error. Click near the country/region.", diffDescInter: "Moderate margin of error. Aim for the specific city.", diffDescAdv: "Narrow margin of error. Find the specific landmark.", diffDescExpert: "Very strict. Pinpoint the exact historical coordinates.", diffDescComm: "Explore locations shared by players worldwide!",
+                btnStart: "Start Exploring", leaderboardTitle: "🏆 Today's Top 3", leaderboardLoading: "Loading...",
+                targetIntro: "Find this location on the map!", scoreBoard: "Scores", resultTitle: "Result", resultDist: "Distance missed", resultScore: "Score Acquired", btnNext: "Next Turn",
+                gameEnd: "Finished!", btnRestart: "Back to Menu", turnSubtitle: "Ready to find the next location?", btnReady: "Ready (View Map)",
+                msgPerfect: "Perfect! You clicked exactly within the area!", msgExcellent: "Excellent! Incredibly close.", msgGood: "Great! You have a good sense of location.", msgOkay: "Close, general direction is right.", msgBad: "Quite far off. Be more careful!", msgFail: "Completely off the mark. Keep trying!",
+                distHit: "Area Hit! (From center:", playerTurn: "'s Turn", playerReady: " is Ready!", roundTxt: "Round", winTxt: " Wins!", anon: "Anonymous", myMark: "My Guess", realMark: "Actual Center:"
+            },
+            ja: {
+                title: "地図の上で、一緒にトントン！", author: "制作者: Huh Byung doo",
+                playerCount: "プレイヤー", recordScore: "殿堂入りスコアを記録", namePlaceholder: "名前 (未入力は匿名)", roundCount: "ラウンド",
+                diffSelect: "難易度", diffBeginner: "初級", diffIntermediate: "中級", diffAdvanced: "上級", diffExpert: "最上級", diffCommunity: "🌍 みんなのコース",
+                diffDescBeginner: "許容範囲が広いです。国や地域の近くをタップ。", diffDescInter: "許容範囲は普通。該当する都市周辺を狙います。", diffDescAdv: "許容範囲が狭い。特定のランドマークを探します。", diffDescExpert: "非常に厳しい。歴史的な場所の正確な座標が必要。", diffDescComm: "世界中の人がクラウドに共有した問題です！",
+                btnStart: "探検を始める", leaderboardTitle: "🏆 今日のTop 3", leaderboardLoading: "読み込み中...",
+                targetIntro: "次の場所を探してください！", scoreBoard: "スコア", resultTitle: "結果", resultDist: "実際の場所からの距離", resultScore: "獲得スコア", btnNext: "次のターンへ",
+                gameEnd: "探検終了！", btnRestart: "最初に戻る", turnSubtitle: "次の場所を探す準備はできましたか？", btnReady: "確認 (地図を見る)",
+                msgPerfect: "完璧です！対象エリア内に正確にタップしました！", msgExcellent: "素晴らしい！正解にとても近いです。", msgGood: "お見事！かなり正確な位置です。", msgOkay: "惜しい。方向は合っていました。", msgBad: "かなり外れました。次は慎重に。", msgFail: "全く違う場所です！",
+                distHit: "正解エリア命中！ (中心から", playerTurn: "のターン", playerReady: "の準備完了！", roundTxt: "ラウンド", winTxt: "が優勝しました！", anon: "匿名", myMark: "私の選択", realMark: "実際の中心:"
+            },
+            zh: {
+                title: "地图上，一起点点！", author: "创作者: Huh Byung doo",
+                playerCount: "参与人数", recordScore: "记录分数到名人堂", namePlaceholder: "名字 (留空为匿名)", roundCount: "回合数",
+                diffSelect: "难度", diffBeginner: "初级", diffIntermediate: "中级", diffAdvanced: "高级", diffExpert: "专家", diffCommunity: "🌍 社区路线",
+                diffDescBeginner: "误差范围大。点击国家/地区附近即可获得高分。", diffDescInter: "误差范围中等。请瞄准特定城市或地区。", diffDescAdv: "误差范围小。需要找到特定地标或区域。", diffDescExpert: "非常严格。必须指出历史名胜的确切坐标。", diffDescComm: "探索世界各地玩家共享的位置！",
+                btnStart: "开始探险", leaderboardTitle: "🏆 今日前三名", leaderboardLoading: "加载中...",
+                targetIntro: "在地图上找到以下位置！", scoreBoard: "得分板", resultTitle: "探索结果", resultDist: "偏离距离", resultScore: "获得分数", btnNext: "下一回合",
+                gameEnd: "探险结束！", btnRestart: "返回主菜单", turnSubtitle: "准备好寻找下一个位置了吗？", btnReady: "准备 (查看地图)",
+                msgPerfect: "完美！您准确点击了该区域！", msgExcellent: "太棒了！离目标非常近。", msgGood: "很好！方向感不错。", msgOkay: "有点偏，但大致方向是对的。", msgBad: "差得有点远，下次仔细点！", msgFail: "完全偏离目标，继续努力！",
+                distHit: "命中目标区域！(距中心：", playerTurn: "的回合", playerReady: " 准备就绪！", roundTxt: "回合", winTxt: " 获胜！", anon: "匿名探险家", myMark: "我的猜测", realMark: "实际中心："
+            },
+            es: {
+                title: "¡Toca Juntos en el Mapa!", author: "Creador: Huh Byung doo",
+                playerCount: "Jugadores", recordScore: "Guardar Puntuación", namePlaceholder: "Nombre (o Anónimo)", roundCount: "Rondas",
+                diffSelect: "Dificultad", diffBeginner: "Fácil", diffIntermediate: "Medio", diffAdvanced: "Difícil", diffExpert: "Experto", diffCommunity: "🌍 Cursos Comunitarios",
+                diffDescBeginner: "Margen de error amplio. Haz clic cerca del país.", diffDescInter: "Margen moderado. Apunta a la ciudad específica.", diffDescAdv: "Margen estrecho. Encuentra el lugar específico.", diffDescExpert: "Muy estricto. Señala las coordenadas exactas.", diffDescComm: "¡Explora lugares compartidos por jugadores!",
+                btnStart: "Empezar", leaderboardTitle: "🏆 Top 3 de Hoy", leaderboardLoading: "Cargando...",
+                targetIntro: "¡Encuentra este lugar en el mapa!", scoreBoard: "Puntuación", resultTitle: "Resultado", resultDist: "Distancia", resultScore: "Puntos", btnNext: "Siguiente Turno",
+                gameEnd: "¡Terminado!", btnRestart: "Volver al Menú", turnSubtitle: "¿Listo para buscar?", btnReady: "Listo (Ver Mapa)",
+                msgPerfect: "¡Perfecto! ¡Le diste al área exacta!", msgExcellent: "¡Excelente! Increíblemente cerca.", msgGood: "¡Genial! Tienes buen sentido de la ubicación.", msgOkay: "Cerca, la dirección general es correcta.", msgBad: "Bastante lejos. ¡Ten más cuidado!", msgFail: "Totalmente desviado. ¡Sigue intentando!",
+                distHit: "¡Área Acertada! (Desde el centro:", playerTurn: " (Turno)", playerReady: " ¡Listo!", roundTxt: "Ronda", winTxt: " ¡Gana!", anon: "Anónimo", myMark: "Mi Elección", realMark: "Centro Real:"
+            },
+            fr: {
+                title: "Touchez Ensemble sur la Carte !", author: "Créateur: Huh Byung doo",
+                playerCount: "Joueurs", recordScore: "Sauvegarder le score", namePlaceholder: "Nom (ou Anonyme)", roundCount: "Tours",
+                diffSelect: "Difficulté", diffBeginner: "Débutant", diffIntermediate: "Intermédiaire", diffAdvanced: "Avancé", diffExpert: "Expert", diffCommunity: "🌍 Cours Communautaires",
+                diffDescBeginner: "Marge d'erreur généreuse. Cliquez près du pays/région.", diffDescInter: "Marge d'erreur modérée. Visez la ville spécifique.", diffDescAdv: "Marge d'erreur étroite. Trouvez le point de repère spécifique.", diffDescExpert: "Très strict. Identifiez les coordonnées exactes.", diffDescComm: "Explorez les lieux partagés par les joueurs du monde entier !",
+                btnStart: "Commencer", leaderboardTitle: "🏆 Top 3 du Jour", leaderboardLoading: "Chargement...",
+                targetIntro: "Trouvez cet endroit sur la carte !", scoreBoard: "Scores", resultTitle: "Résultat", resultDist: "Distance manquée", resultScore: "Score acquis", btnNext: "Tour suivant",
+                gameEnd: "Terminé !", btnRestart: "Retour au menu", turnSubtitle: "Prêt à trouver le prochain lieu ?", btnReady: "Prêt (Voir la carte)",
+                msgPerfect: "Parfait ! Vous avez cliqué exactement dans la zone !", msgExcellent: "Excellent ! Incroyablement proche.", msgGood: "Super ! Vous avez un bon sens de l'orientation.", msgOkay: "Proche, la direction générale est bonne.", msgBad: "Assez loin. Soyez plus prudent !", msgFail: "Complètement à côté. Continuez à essayer !",
+                distHit: "Zone touchée ! (Du centre :", playerTurn: " (Tour)", playerReady: " est prêt(e) !", roundTxt: "Tour", winTxt: " a gagné !", anon: "Anonyme", myMark: "Mon choix", realMark: "Centre réel :"
+            },
+            de: {
+                title: "Gemeinsam auf die Karte tippen!", author: "Ersteller: Huh Byung doo",
+                playerCount: "Spieler", recordScore: "Punktzahl speichern", namePlaceholder: "Name (oder Anonym)", roundCount: "Runden",
+                diffSelect: "Schwierigkeit", diffBeginner: "Anfänger", diffIntermediate: "Mittel", diffAdvanced: "Fortgeschritten", diffExpert: "Experte", diffCommunity: "🌍 Community-Kurse",
+                diffDescBeginner: "Großzügige Fehlertoleranz. Klicken Sie in die Nähe des Landes/der Region.", diffDescInter: "Moderate Fehlertoleranz. Zielen Sie auf die spezifische Stadt.", diffDescAdv: "Geringe Fehlertoleranz. Finden Sie das spezifische Wahrzeichen.", diffDescExpert: "Sehr streng. Bestimmen Sie die genauen Koordinaten.", diffDescComm: "Entdecken Sie Orte, die von Spielern weltweit geteilt wurden!",
+                btnStart: "Starten", leaderboardTitle: "🏆 Top 3 von heute", leaderboardLoading: "Wird geladen...",
+                targetIntro: "Finden Sie diesen Ort auf der Karte!", scoreBoard: "Punkte", resultTitle: "Ergebnis", resultDist: "Verfehlte Distanz", resultScore: "Erreichte Punkte", btnNext: "Nächste Runde",
+                gameEnd: "Beendet!", btnRestart: "Zurück zum Menü", turnSubtitle: "Bereit für den nächsten Ort?", btnReady: "Bereit (Karte ansehen)",
+                msgPerfect: "Perfekt! Sie haben genau in den Bereich geklickt!", msgExcellent: "Ausgezeichnet! Unglaublich nah dran.", msgGood: "Großartig! Sie haben einen guten Orientierungssinn.", msgOkay: "Nah dran, die allgemeine Richtung stimmt.", msgBad: "Ziemlich weit weg. Seien Sie vorsichtiger!", msgFail: "Völlig daneben. Versuchen Sie es weiter!",
+                distHit: "Bereich getroffen! (Vom Zentrum:", playerTurn: " ist dran", playerReady: " ist bereit!", roundTxt: "Runde", winTxt: " gewinnt!", anon: "Anonym", myMark: "Meine Wahl", realMark: "Tatsächliches Zentrum:"
+            },
+            pt: {
+                title: "Toquem Juntos no Mapa!", author: "Criador: Huh Byung doo",
+                playerCount: "Jogadores", recordScore: "Salvar Pontuação", namePlaceholder: "Nome (ou Anônimo)", roundCount: "Rodadas",
+                diffSelect: "Dificuldade", diffBeginner: "Iniciante", diffIntermediate: "Intermediário", diffAdvanced: "Avançado", diffExpert: "Especialista", diffCommunity: "🌍 Cursos Comunitários",
+                diffDescBeginner: "Margem de erro generosa. Clique perto do país.", diffDescInter: "Margem moderada. Mire na cidade específica.", diffDescAdv: "Margem estreita. Encontre o ponto de referência específico.", diffDescExpert: "Muito rigoroso. Identifique as coordenadas exatas.", diffDescComm: "Explore locais compartilhados por jogadores!",
+                btnStart: "Começar", leaderboardTitle: "🏆 Top 3 de Hoje", leaderboardLoading: "Carregando...",
+                targetIntro: "Encontre este local no mapa!", scoreBoard: "Placar", resultTitle: "Resultado", resultDist: "Distância percorrida", resultScore: "Pontos", btnNext: "Próxima Rodada",
+                gameEnd: "Terminado!", btnRestart: "Voltar ao Menu", turnSubtitle: "Pronto para o próximo local?", btnReady: "Pronto (Ver Mapa)",
+                msgPerfect: "Perfeito! Você clicou exatamente na área!", msgExcellent: "Excelente! Incrivelmente perto.", msgGood: "Ótimo! Você tem um bom senso de direção.", msgOkay: "Perto, a direção geral está certa.", msgBad: "Bastante longe. Tenha mais cuidado!", msgFail: "Totalmente fora. Continue tentando!",
+                distHit: "Área Atingida! (Do centro:", playerTurn: " (Vez)", playerReady: " está pronto!", roundTxt: "Rodada", winTxt: " venceu!", anon: "Anônimo", myMark: "Minha Escolha", realMark: "Centro Real:"
+            },
+            it: {
+                title: "Tocca Insieme sulla Mappa!", author: "Creatore: Huh Byung doo",
+                playerCount: "Giocatori", recordScore: "Salva Punteggio", namePlaceholder: "Nome (o Anonimo)", roundCount: "Turni",
+                diffSelect: "Difficoltà", diffBeginner: "Principiante", diffIntermediate: "Intermedio", diffAdvanced: "Avanzato", diffExpert: "Esperto", diffCommunity: "🌍 Corsi Comunitari",
+                diffDescBeginner: "Margine di errore ampio. Clicca vicino al paese.", diffDescInter: "Margine moderato. Mira alla città specifica.", diffDescAdv: "Margine ristretto. Trova il punto di riferimento.", diffDescExpert: "Molto severo. Individua le coordinate esatte.", diffDescComm: "Esplora i luoghi condivisi dai giocatori!",
+                btnStart: "Inizia", leaderboardTitle: "🏆 Top 3 di Oggi", leaderboardLoading: "Caricamento...",
+                targetIntro: "Trova questo luogo sulla mappa!", scoreBoard: "Punteggi", resultTitle: "Risultato", resultDist: "Distanza mancata", resultScore: "Punti ottenuti", btnNext: "Prossimo Turno",
+                gameEnd: "Finito!", btnRestart: "Torna al Menu", turnSubtitle: "Pronto per il prossimo luogo?", btnReady: "Pronto (Vedi Mappa)",
+                msgPerfect: "Perfetto! Hai cliccato esattamente nell'area!", msgExcellent: "Eccellente! Incredibilmente vicino.", msgGood: "Ottimo! Hai un buon senso dell'orientamento.", msgOkay: "Vicino, la direzione generale è giusta.", msgBad: "Abbastanza lontano. Fai più attenzione!", msgFail: "Completamente fuori strada. Riprova!",
+                distHit: "Area Colpita! (Dal centro:", playerTurn: " (Turno)", playerReady: " è pronto!", roundTxt: "Turno", winTxt: " vince!", anon: "Anonimo", myMark: "La mia scelta", realMark: "Centro reale:"
+            },
+            ru: {
+                title: "Тапнем вместе по карте!", author: "Создатель: Huh Byung doo",
+                playerCount: "Игроки", recordScore: "Сохранить рекорд", namePlaceholder: "Имя (или Аноним)", roundCount: "Раунды",
+                diffSelect: "Сложность", diffBeginner: "Новичок", diffIntermediate: "Любитель", diffAdvanced: "Профи", diffExpert: "Эксперт", diffCommunity: "🌍 Карты сообщества",
+                diffDescBeginner: "Большая погрешность. Кликайте рядом со страной.", diffDescInter: "Средняя погрешность. Цельтесь в город.", diffDescAdv: "Малая погрешность. Найдите точную достопримечательность.", diffDescExpert: "Очень строго. Укажите точные координаты.", diffDescComm: "Исследуйте места от игроков со всего мира!",
+                btnStart: "Начать", leaderboardTitle: "🏆 Топ-3 за сегодня", leaderboardLoading: "Загрузка...",
+                targetIntro: "Найдите это место на карте!", scoreBoard: "Счет", resultTitle: "Результат", resultDist: "Промах (дистанция)", resultScore: "Очки", btnNext: "Следующий ход",
+                gameEnd: "Завершено!", btnRestart: "В главное меню", turnSubtitle: "Готовы искать следующее место?", btnReady: "Готов (Карта)",
+                msgPerfect: "Идеально! Точное попадание в зону!", msgExcellent: "Отлично! Невероятно близко.", msgGood: "Хорошо! У вас отличное чувство карты.", msgOkay: "Близко, верное направление.", msgBad: "Довольно далеко. Будьте точнее!", msgFail: "Мимо. Попробуйте еще!",
+                distHit: "Попадание в зону! (От центра:", playerTurn: " (Ход)", playerReady: " готов!", roundTxt: "Раунд", winTxt: " побеждает!", anon: "Аноним", myMark: "Мой выбор", realMark: "Реальный центр:"
+            },
+            hi: {
+                title: "नक्शे पर एक साथ टैप करें!", author: "निर्माता: Huh Byung doo",
+                playerCount: "खिलाड़ी", recordScore: "स्कोर सहेजें", namePlaceholder: "नाम (या अनाम)", roundCount: "राउंड",
+                diffSelect: "कठिनाई", diffBeginner: "शुरुआती", diffIntermediate: "मध्यम", diffAdvanced: "उन्नत", diffExpert: "विशेषज्ञ", diffCommunity: "🌍 समुदाय मानचित्र",
+                diffDescBeginner: "बड़ी छूट। देश के पास क्लिक करें।", diffDescInter: "मध्यम छूट। शहर पर निशाना लगाएँ।", diffDescAdv: "कम छूट। विशिष्ट स्थान खोजें।", diffDescExpert: "बहुत सख्त। सटीक निर्देशांक खोजें।", diffDescComm: "दुनिया भर के खिलाड़ियों द्वारा साझा किए गए स्थान खोजें!",
+                btnStart: "शुरू करें", leaderboardTitle: "🏆 आज के टॉप 3", leaderboardLoading: "लोड हो रहा है...",
+                targetIntro: "नक्शे पर यह स्थान खोजें!", scoreBoard: "स्कोर", resultTitle: "परिणाम", resultDist: "दूरी चूक गए", resultScore: "प्राप्त स्कोर", btnNext: "अगली बारी",
+                gameEnd: "समाप्त!", btnRestart: "मेनू पर वापस जाएं", turnSubtitle: "अगला स्थान खोजने के लिए तैयार हैं?", btnReady: "तैयार (नक्शा देखें)",
+                msgPerfect: "बिल्कुल सही! आपने सटीक क्षेत्र पर क्लिक किया!", msgExcellent: "उत्कृष्ट! बहुत करीब।", msgGood: "बढ़िया! आपको स्थान की अच्छी समझ है।", msgOkay: "करीब, दिशा सही है।", msgBad: "काफी दूर। सावधान रहें!", msgFail: "बिल्कुल गलत। कोशिश करते रहें!",
+                distHit: "क्षेत्र पर निशाना! (केंद्र से:", playerTurn: " की बारी", playerReady: " तैयार है!", roundTxt: "राउंड", winTxt: " की जीत!", anon: "अनाम", myMark: "मेरा अनुमान", realMark: "वास्तविक केंद्र:"
+            }
+        };
+
+        // 브라우저 언어 자동 감지 및 설정
+        let currentLang = 'ko';
+        const userLang = navigator.language || navigator.userLanguage;
+        if (userLang.startsWith('en')) currentLang = 'en';
+        else if (userLang.startsWith('ja')) currentLang = 'ja';
+        else if (userLang.startsWith('zh')) currentLang = 'zh';
+        else if (userLang.startsWith('es')) currentLang = 'es';
+        else if (userLang.startsWith('fr')) currentLang = 'fr';
+        else if (userLang.startsWith('de')) currentLang = 'de';
+        else if (userLang.startsWith('pt')) currentLang = 'pt';
+        else if (userLang.startsWith('it')) currentLang = 'it';
+        else if (userLang.startsWith('ru')) currentLang = 'ru';
+        else if (userLang.startsWith('hi')) currentLang = 'hi';
+        else if (!userLang.startsWith('ko')) currentLang = 'en'; // 그 외의 언어는 영어로 폴백
+
+        function updateTexts() {
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (i18n[currentLang][key]) {
+                    if(el.tagName === 'INPUT' && el.type === 'text') el.placeholder = i18n[currentLang][key];
+                    else el.innerHTML = i18n[currentLang][key];
+                }
+            });
+            for (let i = 1; i <= gameState.numPlayers; i++) {
+                const input = document.getElementById(`player-name-${i}`);
+                if(input) input.placeholder = `${i}P ${i18n[currentLang].namePlaceholder}`;
+            }
+            updateDiffDesc(gameState.difficulty);
+        }
+
+        document.getElementById('lang-selector').addEventListener('change', (e) => {
+            currentLang = e.target.value;
+            updateTexts();
+            if (!document.getElementById('hud-top').classList.contains('hidden') && gameState.currentTarget) {
+                const placeName = getPlaceName(gameState.currentTarget);
+                document.getElementById('hud-target').textContent = placeName;
+                document.getElementById('turn-target-text').textContent = placeName;
+            }
+        });
+
+
+        // --- Firebase 설정 ---
+        let db, auth, user;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-geo-game';
+        let isFirebaseReady = false;
+
+        try {
+            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+            if (firebaseConfig) {
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                const initAuth = async () => {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
+                    else await signInAnonymously(auth);
+                };
+
+                initAuth().then(() => {
+                    onAuthStateChanged(auth, (u) => {
+                        if (u) {
+                            user = u;
+                            isFirebaseReady = true;
+                            loadLeaderboard();
+                            loadCommunityLocations();
+                        }
+                    });
+                });
+            } else {
+                document.getElementById('leaderboard-list').innerHTML = `<li class="text-gray-400 text-center py-1">${currentLang === 'ko' ? '클라우드가 연결되지 않았습니다.' : 'Cloud disconnected.'}</li>`;
+            }
+        } catch (e) {
+            console.warn("Firebase Init Failed.", e);
+        }
+
+        // --- 다국어 지원 장소 목록 (11개 국어 지원) ---
+        // 언어별 이름이 없으면 영어(en) 또는 한국어(ko)를 표시합니다.
+        const locationDB = {
+            beginner: [
+                { name: { ko: "대한민국", en: "South Korea", ja: "韓国", zh: "韩国", es: "Corea del Sur", fr: "Corée du Sud", de: "Südkorea", pt: "Coreia do Sul", it: "Corea del Sud", ru: "Южная Корея", hi: "दक्षिण कोरिया" }, lat: 36.5, lng: 127.5, radius: 150 },
+                { name: { ko: "프랑스", en: "France", ja: "フランス", zh: "法国", es: "Francia", fr: "France", de: "Frankreich", pt: "França", it: "Francia", ru: "Франция", hi: "फ्रांस" }, lat: 46.2276, lng: 2.2137, radius: 400 },
+                { name: { ko: "호주", en: "Australia", ja: "オーストラリア", zh: "澳大利亚", es: "Australia", fr: "Australie", de: "Australien", pt: "Austrália", it: "Australia", ru: "Австралия", hi: "ऑस्ट्रेलिया" }, lat: -25.2743, lng: 133.7751, radius: 2000 },
+                { name: { ko: "이집트", en: "Egypt", ja: "エジプト", zh: "埃及", es: "Egipto", fr: "Égypte", de: "Ägypten", pt: "Egito", it: "Egitto", ru: "Египет", hi: "मिस्र" }, lat: 26.8205, lng: 30.8024, radius: 500 },
+                { name: { ko: "브라질", en: "Brazil", ja: "ブラジル", zh: "巴西", es: "Brasil", fr: "Brésil", de: "Brasilien", pt: "Brasil", it: "Brasile", ru: "Бразилия", hi: "ब्राज़िल" }, lat: -14.2350, lng: -51.9252, radius: 1500 },
+                { name: { ko: "미국", en: "United States", ja: "アメリカ", zh: "美国", es: "Estados Unidos", fr: "États-Unis", de: "USA", pt: "Estados Unidos", it: "Stati Uniti", ru: "США", hi: "संयुक्त राज्य अमेरिका" }, lat: 37.0902, lng: -95.7129, radius: 2000 }
+            ],
+            intermediate: [
+                { name: { ko: "서울특별시", en: "Seoul", ja: "ソウル", zh: "首尔", es: "Seúl", fr: "Séoul", de: "Seoul", pt: "Seul", it: "Seul", ru: "Сеул", hi: "सियोल" }, lat: 37.5665, lng: 126.9780, radius: 15 },
+                { name: { ko: "뉴욕 (미국)", en: "New York", ja: "ニューヨーク", zh: "纽约", es: "Nueva York", fr: "New York", de: "New York", pt: "Nova Iorque", it: "New York", ru: "Нью-Йорк", hi: "न्यूयॉर्क" }, lat: 40.7127, lng: -74.0059, radius: 20 },
+                { name: { ko: "런던 (영국)", en: "London", ja: "ロンドン", zh: "伦敦", es: "Londres", fr: "Londres", de: "London", pt: "Londres", it: "Londra", ru: "Лондон", hi: "लंदन" }, lat: 51.5073, lng: -0.1276, radius: 25 },
+                { name: { ko: "도쿄 (일본)", en: "Tokyo", ja: "東京", zh: "东京", es: "Tokio", fr: "Tokyo", de: "Tokio", pt: "Tóquio", it: "Tokyo", ru: "Токио", hi: "टोक्यो" }, lat: 35.6761, lng: 139.6503, radius: 30 },
+                { name: { ko: "파리 (프랑스)", en: "Paris", ja: "パリ", zh: "巴黎", es: "París", fr: "Paris", de: "Paris", pt: "Paris", it: "Parigi", ru: "Париж", hi: "पेरिस" }, lat: 48.8566, lng: 2.3522, radius: 15 }
+            ],
+            advanced: [
+                { name: { ko: "에펠탑", en: "Eiffel Tower", ja: "エッフェル塔", zh: "埃菲尔铁塔", es: "Torre Eiffel", fr: "Tour Eiffel", de: "Eiffelturm", pt: "Torre Eiffel", it: "Torre Eiffel", ru: "Эйфелева башня", hi: "एफिल टावर" }, lat: 48.8583, lng: 2.2944, radius: 2 },
+                { name: { ko: "자유의 여신상", en: "Statue of Liberty", ja: "自由の女神", zh: "自由女神像", es: "Estatua de la Libertad", fr: "Statue de la Liberté", de: "Freiheitsstatue", pt: "Estátua da Liberdade", it: "Statua della Libertà", ru: "Статуя Свободы", hi: "स्टैच्यू ऑफ लिबर्टी" }, lat: 40.6892, lng: -74.0445, radius: 2 },
+                { name: { ko: "콜로세움", en: "Colosseum", ja: "コロッセオ", zh: "罗马斗兽场", es: "Coliseo", fr: "Colisée", de: "Kolosseum", pt: "Coliseu", it: "Colosseo", ru: "Колизей", hi: "कोलिज़ीयम" }, lat: 41.8902, lng: 12.4922, radius: 2 },
+                { name: { ko: "만리장성", en: "Great Wall of China", ja: "万里の長城", zh: "万里长城", es: "Gran Muralla China", fr: "Grande Muraille", de: "Chinesische Mauer", pt: "Grande Muralha", it: "Grande Muraglia", ru: "Великая Китайская стена", hi: "चीन की महान दीवार" }, lat: 40.4319, lng: 116.5703, radius: 10 },
+                { name: { ko: "타지마할", en: "Taj Mahal", ja: "タージマハル", zh: "泰姬陵", es: "Taj Mahal", fr: "Taj Mahal", de: "Taj Mahal", pt: "Taj Mahal", it: "Taj Mahal", ru: "Тадж-Махал", hi: "ताज महल" }, lat: 27.1751, lng: 78.0421, radius: 2 }
+            ],
+            expert: [
+                { name: { ko: "우금치", en: "Ugeumchi", ja: "牛禁雉", zh: "牛禁雉", es: "Ugeumchi", fr: "Ugeumchi", de: "Ugeumchi", pt: "Ugeumchi", it: "Ugeumchi", ru: "Угымчхи", hi: "उग्यूमची" }, lat: 36.4353, lng: 127.1190, radius: 2 },
+                { name: { ko: "아비뇽", en: "Avignon", ja: "アヴィニョン", zh: "阿维尼翁", es: "Aviñón", fr: "Avignon", de: "Avignon", pt: "Avignon", it: "Avignone", ru: "Авиньон", hi: "एविग्नन" }, lat: 43.9493, lng: 4.8055, radius: 5 },
+                { name: { ko: "워털루", en: "Waterloo", ja: "ワーテルロー", zh: "滑铁卢", es: "Waterloo", fr: "Waterloo", de: "Waterloo", pt: "Waterloo", it: "Waterloo", ru: "Ватерлоо", hi: "वाटरलू" }, lat: 50.7135, lng: 4.3965, radius: 5 },
+                { name: { ko: "오마하 해변", en: "Omaha Beach", ja: "オマハ・ビーチ", zh: "奥马哈海滩", es: "Playa de Omaha", fr: "Omaha Beach", de: "Omaha Beach", pt: "Praia de Omaha", it: "Omaha Beach", ru: "Пляж Омаха", hi: "ओमाहा बीच" }, lat: 49.3700, lng: -0.8800, radius: 5 },
+                { name: { ko: "체르노빌", en: "Chernobyl", ja: "チェルノブイリ", zh: "切尔诺贝利", es: "Chernóbil", fr: "Tchernobyl", de: "Tschernobyl", pt: "Chernobyl", it: "Černobyl'", ru: "Чернобыль", hi: "चेरनोबिल" }, lat: 51.3891, lng: 30.0994, radius: 3 }
+            ],
+            community: []
+        };
+
+        const difficultyScale = { beginner: 1500, intermediate: 400, advanced: 50, expert: 10, community: 150 };
+
+        let map, baseLayer, labelLayer;
+        let mapMarkers = [];
+        let mapPolyline = null;
+
+        const gameState = {
+            numPlayers: 1, difficulty: 'beginner', currentRound: 1, maxRounds: 3,
+            currentPlayer: 1, scores: [], playerNames: [],
+            currentTarget: null, roundLocations: [], isGuessing: false, recordScore: false
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            setupEventListeners();
+            generateNameInputs();
+            document.getElementById('lang-selector').value = currentLang;
+            updateTexts();
+        });
+
+        function initMap() {
+            map = L.map('map', { center: [30, 120], zoom: 3, zoomControl: false });
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+            baseLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png', { noWrap: true }).addTo(map);
+            labelLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png', { noWrap: true });
+            map.on('click', handleMapClick);
+        }
+
+        function generateNameInputs() {
+            const container = document.getElementById('name-inputs-container');
+            container.innerHTML = '';
+            for (let i = 1; i <= gameState.numPlayers; i++) {
+                container.innerHTML += `<input type="text" id="player-name-${i}" class="w-full p-2 border border-gray-300 rounded text-xs sm:text-sm focus:outline-none focus:border-green-500">`;
+            }
+            updateTexts();
+        }
+
+        function updateDiffDesc(diff) {
+            const descEl = document.getElementById('diff-desc');
+            if(diff === 'beginner') descEl.textContent = i18n[currentLang].diffDescBeginner;
+            if(diff === 'intermediate') descEl.textContent = i18n[currentLang].diffDescInter;
+            if(diff === 'advanced') descEl.textContent = i18n[currentLang].diffDescAdv;
+            if(diff === 'expert') descEl.textContent = i18n[currentLang].diffDescExpert;
+            if(diff === 'community') descEl.textContent = i18n[currentLang].diffDescComm;
+        }
+
+        function setupEventListeners() {
+            document.querySelectorAll('.player-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.player-btn').forEach(b => b.classList.replace('bg-green-600', 'bg-white'));
+                    document.querySelectorAll('.player-btn').forEach(b => b.classList.replace('text-white', 'text-gray-600'));
+                    e.target.classList.replace('bg-white', 'bg-green-600');
+                    e.target.classList.replace('text-gray-600', 'text-white');
+                    gameState.numPlayers = parseInt(e.target.dataset.players);
+                    generateNameInputs();
+                });
+            });
+
+            document.querySelectorAll('.round-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.round-btn').forEach(b => b.classList.replace('bg-green-600', 'bg-white'));
+                    document.querySelectorAll('.round-btn').forEach(b => b.classList.replace('text-white', 'text-gray-600'));
+                    e.target.classList.replace('bg-white', 'bg-green-600');
+                    e.target.classList.replace('text-gray-600', 'text-white');
+                    gameState.maxRounds = parseInt(e.target.dataset.rounds);
+                });
+            });
+
+            document.querySelectorAll('.diff-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const targetBtn = e.target.closest('.diff-btn');
+                    
+                    // 기존 버튼들 초기화
+                    document.querySelectorAll('.diff-btn').forEach(b => {
+                        if (b.dataset.diff === 'community') {
+                            b.classList.remove('bg-indigo-50', 'text-indigo-700', 'border-indigo-400');
+                            b.classList.add('bg-white', 'text-gray-600', 'border-gray-300');
+                        } else {
+                            b.classList.remove('bg-green-500', 'text-white', 'border-green-600', 'shadow-md');
+                            b.classList.add('bg-gray-100', 'text-gray-500', 'border-gray-300');
+                        }
+                    });
+                    
+                    // 선택된 버튼 하이라이트
+                    if (targetBtn.dataset.diff === 'community') {
+                        targetBtn.classList.remove('bg-white', 'text-gray-600', 'border-gray-300');
+                        targetBtn.classList.add('bg-indigo-50', 'text-indigo-700', 'border-indigo-400');
+                    } else {
+                        targetBtn.classList.remove('bg-gray-100', 'text-gray-500', 'border-gray-300');
+                        targetBtn.classList.add('bg-green-500', 'text-white', 'border-green-600', 'shadow-md');
+                    }
+                    
+                    gameState.difficulty = targetBtn.dataset.diff;
+                    updateDiffDesc(gameState.difficulty);
+                });
+            });
+
+            document.getElementById('record-score-toggle').addEventListener('change', (e) => {
+                gameState.recordScore = e.target.checked;
+                document.getElementById('name-inputs-container').classList.toggle('hidden', !gameState.recordScore);
+            });
+
+            document.getElementById('btn-start-game').addEventListener('click', startGame);
+
+            document.getElementById('btn-ready').addEventListener('click', () => {
+                hideModal('modal-turn');
+                gameState.isGuessing = true;
+                document.getElementById('map').classList.add('guessing-cursor');
+            });
+
+            document.getElementById('btn-next-turn').addEventListener('click', () => {
+                hideModal('modal-result');
+                clearMapMarkers();
+                nextTurn();
+            });
+
+            document.getElementById('btn-restart').addEventListener('click', () => {
+                hideModal('modal-final');
+                showModal('modal-start');
+            });
+        }
+
+        function loadCommunityLocations() {
+            if (!user || !db) return;
+            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'geo_custom_locations'), (snapshot) => {
+                const loaded = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    loaded.push({ name: { ko: data.name, en: data.name }, lat: data.lat, lng: data.lng, radius: data.radius });
+                });
+                locationDB.community = loaded;
+                document.getElementById('btn-community-diff').innerHTML = `${i18n[currentLang].diffCommunity} (${loaded.length})`;
+            });
+        }
+
+        function loadLeaderboard() {
+            if (!user || !db) return;
+            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'geo_scores_daily'), (snapshot) => {
+                const today = new Date().toLocaleDateString();
+                let allScores = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    if (data.date === today) allScores.push(data);
+                });
+                allScores.sort((a, b) => b.score - a.score);
+                const top3 = allScores.slice(0, 3);
+                
+                const list = document.getElementById('leaderboard-list');
+                list.innerHTML = '';
+                if (top3.length === 0) {
+                    list.innerHTML = `<li class="text-gray-400 text-center py-1 text-xs">${currentLang === 'ko' ? '기록이 없습니다.' : 'No records yet.'}</li>`;
+                    return;
+                }
+                const medals = ['🥇', '🥈', '🥉'];
+                top3.forEach((rec, idx) => {
+                    list.innerHTML += `<li class="flex justify-between items-center bg-white px-2 py-1 border rounded"><div class="font-bold">${medals[idx]} ${rec.name}</div><div class="text-right text-green-600 font-black">${rec.score.toLocaleString()}</div></li>`;
+                });
+            });
+        }
+
+        async function saveScoreToFirebase(playerName, score) {
+            if (!user || !db || !gameState.recordScore) return;
+            const finalName = playerName.trim() === '' ? i18n[currentLang].anon : playerName;
+            try {
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'geo_scores_daily'), {
+                    name: finalName, score: score, date: new Date().toLocaleDateString(), timestamp: Date.now()
+                });
+            } catch (e) { console.error(e); }
+        }
+
+        function startGame() {
+            gameState.currentRound = 1;
+            gameState.currentPlayer = 1;
+            gameState.scores = Array(gameState.numPlayers).fill(0);
+            gameState.playerNames = [];
+            for(let i=1; i<=gameState.numPlayers; i++) {
+                const input = document.getElementById(`player-name-${i}`);
+                gameState.playerNames.push(input ? input.value : '');
+            }
+
+            let availableLocations = [...locationDB[gameState.difficulty]];
+            if (availableLocations.length === 0) return;
+            shuffleArray(availableLocations);
+            
+            const totalQ = gameState.numPlayers * maxRoundsSafe();
+            gameState.roundLocations = [];
+            let qIdx = 0;
+            while(gameState.roundLocations.length < totalQ) {
+                gameState.roundLocations.push(availableLocations[qIdx % availableLocations.length]);
+                qIdx++;
+            }
+
+            hideModal('modal-start');
+            document.getElementById('hud-top').classList.remove('hidden');
+            updateHUDScore();
+            prepareTurn();
+        }
+        
+        function maxRoundsSafe() { return gameState.maxRounds || 3; }
+
+        function getPlaceName(locObj) {
+            return locObj.name[currentLang] || locObj.name['en'] || locObj.name['ko'];
+        }
+
+        function prepareTurn() {
+            const qIdx = ((gameState.currentRound - 1) * gameState.numPlayers) + (gameState.currentPlayer - 1);
+            gameState.currentTarget = gameState.roundLocations[qIdx];
+
+            const pName = gameState.playerNames[gameState.currentPlayer - 1] || `${gameState.currentPlayer}P`;
+            const placeName = getPlaceName(gameState.currentTarget);
+
+            document.getElementById('turn-player-text').textContent = currentLang === 'ko' ? `${pName}${i18n[currentLang].playerReady}` : `${pName} ${i18n[currentLang].playerReady}`;
+            document.getElementById('turn-target-text').textContent = placeName;
+            
+            document.getElementById('hud-player').textContent = currentLang === 'ko' || currentLang === 'ja' || currentLang === 'zh' ? `${pName}${i18n[currentLang].playerTurn}` : `${pName}${i18n[currentLang].playerTurn}`;
+            document.getElementById('hud-round').textContent = `${i18n[currentLang].roundTxt}: ${gameState.currentRound} / ${gameState.maxRounds}`;
+            document.getElementById('hud-target').textContent = placeName;
+
+            map.setView([30, 0], 2, { animate: true, duration: 1 });
+            showModal('modal-turn');
+        }
+
+        function handleMapClick(e) {
+            if (!gameState.isGuessing) return;
+            gameState.isGuessing = false;
+            document.getElementById('map').classList.remove('guessing-cursor');
+
+            const guessLatLng = e.latlng;
+            const actualLatLng = L.latLng(gameState.currentTarget.lat, gameState.currentTarget.lng);
+            const distanceKm = map.distance(guessLatLng, actualLatLng) / 1000;
+            const targetRadius = gameState.currentTarget.radius || 20;
+            const effectiveDist = Math.max(0, distanceKm - targetRadius);
+
+            let score = Math.round(10000 * Math.exp(-effectiveDist / difficultyScale[gameState.difficulty]));
+            if (score < 50) score = 0;
+
+            gameState.scores[gameState.currentPlayer - 1] += score;
+            updateHUDScore();
+            showResult(guessLatLng, actualLatLng, distanceKm, effectiveDist, score);
+        }
+
+        function showResult(guess, actual, dist, effDist, score) {
+            labelLayer.addTo(map);
+            const gMark = L.marker(guess).addTo(map).bindPopup(i18n[currentLang].myMark).openPopup();
+            
+            const redIcon = new L.Icon({
+                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+            });
+            const tMark = L.marker(actual, {icon: redIcon}).addTo(map).bindPopup(`${i18n[currentLang].realMark} ${getPlaceName(gameState.currentTarget)}`);
+            
+            mapPolyline = L.polyline([guess, actual], { color: effDist === 0 ? '#3b82f6' : '#22c55e', weight: 3, dashArray: '5, 10' }).addTo(map);
+            mapMarkers.push(gMark, tMark);
+            map.fitBounds(L.latLngBounds([guess, actual]), { padding: [50, 50], maxZoom: 6 });
+
+            const distEl = document.getElementById('result-distance');
+            if (effDist === 0) {
+                distEl.textContent = `${i18n[currentLang].distHit} ${dist.toLocaleString(undefined, {maximumFractionDigits: 1})} km)`;
+                distEl.className = "text-lg sm:text-2xl font-black text-blue-600 break-keep";
+            } else {
+                distEl.textContent = `${dist.toLocaleString(undefined, {maximumFractionDigits: 1})} km`;
+                distEl.className = "text-lg sm:text-2xl font-black text-red-500 break-keep";
+            }
+            
+            document.getElementById('result-score').textContent = score.toLocaleString();
+            
+            let msg = "";
+            if (effDist === 0) msg = i18n[currentLang].msgPerfect;
+            else if (score >= 9000) msg = i18n[currentLang].msgExcellent;
+            else if (score >= 7000) msg = i18n[currentLang].msgGood;
+            else if (score >= 4000) msg = i18n[currentLang].msgOkay;
+            else if (score > 0) msg = i18n[currentLang].msgBad;
+            else msg = i18n[currentLang].msgFail;
+            
+            document.getElementById('result-msg').textContent = msg;
+            setTimeout(() => { showModal('modal-result'); }, 1000);
+        }
+
+        function nextTurn() {
+            gameState.currentPlayer++;
+            if (gameState.currentPlayer > gameState.numPlayers) {
+                gameState.currentPlayer = 1;
+                gameState.currentRound++;
+            }
+            if (gameState.currentRound > gameState.maxRounds) endGame();
+            else prepareTurn();
+        }
+
+        function endGame() {
+            document.getElementById('hud-top').classList.add('hidden');
+            const list = document.getElementById('final-scores-list');
+            list.innerHTML = '';
+            
+            let highScore = -1, winnerIdx = 0;
+            gameState.scores.forEach((sc, idx) => {
+                if (sc > highScore) { highScore = sc; winnerIdx = idx; }
+                const pName = gameState.playerNames[idx] || `${idx + 1}P`;
+                list.innerHTML += `<div class="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-200"><span class="font-bold text-gray-700">${pName}</span><span class="font-black text-green-600">${sc.toLocaleString()}</span></div>`;
+                if (gameState.recordScore) saveScoreToFirebase(pName, sc);
+            });
+
+            const winnerName = gameState.playerNames[winnerIdx] || `${winnerIdx + 1}P`;
+            document.getElementById('final-winner').textContent = currentLang === 'ko' || currentLang === 'ja' || currentLang === 'zh' ? `${winnerName}${i18n[currentLang].winTxt}` : `${winnerName}${i18n[currentLang].winTxt}`;
+            showModal('modal-final');
+        }
+
+        function updateHUDScore() {
+            const list = document.getElementById('score-list');
+            list.innerHTML = '';
+            gameState.scores.forEach((sc, idx) => {
+                const isTurn = idx + 1 === gameState.currentPlayer;
+                list.innerHTML += `<li class="flex justify-between ${isTurn ? 'text-green-700 font-extrabold' : ''}"><span>${idx + 1}P</span> <span>${sc.toLocaleString()}</span></li>`;
+            });
+        }
+
+        function clearMapMarkers() {
+            if (map.hasLayer(labelLayer)) map.removeLayer(labelLayer);
+            mapMarkers.forEach(m => map.removeLayer(m));
+            mapMarkers = [];
+            if (mapPolyline) { map.removeLayer(mapPolyline); mapPolyline = null; }
+        }
+
+        function showModal(id) {
+            const el = document.getElementById(id);
+            el.classList.remove('hidden');
+            setTimeout(() => el.classList.remove('opacity-0'), 10);
+        }
+
+        function hideModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+        function shuffleArray(arr) {
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+        }
+    </script>
+</body>
+</html>
